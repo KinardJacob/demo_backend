@@ -19,6 +19,8 @@
   },
   "homepage": "https://github.com/KinardJacob/demo_backend#readme",
   "dependencies": {
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "mongodb": "^7.1.1",
+    "mongoose": "^9.3.3"
   }
 }
