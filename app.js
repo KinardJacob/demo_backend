@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
+const Joi = require('joi');
 const app = express();
 app.use(express.static('public'));
 app.use('/images', express.static('images'));
@@ -273,58 +274,106 @@ app.delete("/api/custom-sections/:id", (req, res) => {
 
 let bookings = [];
 
-const validateBookingPayload = (body) => {
+let nextBookingId = 1;
+
+const bookingSchema = Joi.object({
+  sessionType: Joi.string().trim().required().messages({
+    "string.empty": "Please select a session type.",
+    "any.required": "Please select a session type.",
+  }),
+  preferredDate: Joi.string()
+    .trim()
+    .required()
+    .custom((value, helpers) => {
+      const selectedDate = new Date(value);
+      if (Number.isNaN(selectedDate.getTime())) {
+        return helpers.error("date.invalid");
+      }
+
+      selectedDate.setHours(0, 0, 0, 0);
+
+      const tomorrow = new Date();
+      tomorrow.setHours(0, 0, 0, 0);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+
+      const maxDate = new Date(tomorrow);
+      maxDate.setFullYear(maxDate.getFullYear() + 1);
+
+      if (selectedDate < tomorrow || selectedDate > maxDate) {
+        return helpers.error("date.range");
+      }
+
+      return value;
+    })
+    .messages({
+      "string.empty": "Please select a preferred date.",
+      "any.required": "Please select a preferred date.",
+      "date.invalid": "Please choose a valid date.",
+      "date.range": "Date must be within the next year.",
+    }),
+  name: Joi.string().trim().min(2).max(50).required().messages({
+    "string.empty": "Name is required.",
+    "any.required": "Name is required.",
+    "string.min": "Name must be between 2 and 50 characters.",
+    "string.max": "Name must be between 2 and 50 characters.",
+  }),
+  email: Joi.string()
+    .trim()
+    .required()
+    .pattern(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)
+    .messages({
+      "string.empty": "Email is required.",
+      "any.required": "Email is required.",
+      "string.pattern.base": "Please enter a valid email address.",
+    }),
+  phone: Joi.string()
+    .trim()
+    .required()
+    .custom((value, helpers) => {
+      if (!/^\+?[\d\s\-()]+$/.test(value) || value.replace(/\D/g, "").length < 10) {
+        return helpers.error("phone.invalid");
+      }
+
+      return value;
+    })
+    .messages({
+      "string.empty": "Phone number is required.",
+      "any.required": "Phone number is required.",
+      "phone.invalid": "Please enter a valid phone number.",
+    }),
+  details: Joi.string().trim().allow("").max(500).messages({
+    "string.max": "Details must be 500 characters or less.",
+  }),
+});
+
+const formatJoiErrors = (details = []) => {
   const errors = {};
 
-  const sessionType = normalizeString(body.sessionType);
-  const preferredDate = normalizeString(body.preferredDate);
-  const name = normalizeString(body.name);
-  const email = normalizeString(body.email);
-  const phone = normalizeString(body.phone);
-  const details = normalizeString(body.details);
-
-  if (!sessionType) {
-    errors.sessionType = "Please select a session type.";
-  }
-
-  if (!preferredDate) {
-    errors.preferredDate = "Please select a preferred date.";
-  } else {
-    const selected = new Date(preferredDate);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    if (isNaN(selected.getTime()) || selected <= today) {
-      errors.preferredDate = "Preferred date must be a future date.";
+  details.forEach((issue) => {
+    const key = issue.path && issue.path.length > 0 ? issue.path[0] : "form";
+    if (!errors[key]) {
+      errors[key] = issue.message;
     }
-  }
+  });
 
-  if (!name) {
-    errors.name = "Name is required.";
-  } else if (name.length < 2 || name.length > 50) {
-    errors.name = "Name must be between 2 and 50 characters.";
-  }
+  return errors;
+};
 
-  if (!email) {
-    errors.email = "Email is required.";
-  } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    errors.email = "Please enter a valid email address.";
-  }
-
-  if (!phone) {
-    errors.phone = "Phone number is required.";
-  } else if (phone.replace(/\D/g, "").length < 10) {
-    errors.phone = "Please enter a valid phone number.";
-  }
-
-  if (details.length > 500) {
-    errors.details = "Details must be 500 characters or less.";
-  }
+const validateBookingPayload = (body) => {
+  const validationResult = bookingSchema.validate(body || {}, {
+    abortEarly: false,
+    stripUnknown: true,
+  });
 
   return {
-    errors,
-    sanitizedPayload: { sessionType, preferredDate, name, email, phone, details },
+    errors: validationResult.error ? formatJoiErrors(validationResult.error.details) : {},
+    sanitizedPayload: validationResult.value || {},
   };
 };
+
+app.get("/api/bookings", (req, res) => {
+  return res.status(200).json({ bookings });
+});
 
 app.post("/api/bookings", (req, res) => {
   const { errors, sanitizedPayload } = validateBookingPayload(req.body || {});
@@ -334,14 +383,58 @@ app.post("/api/bookings", (req, res) => {
   }
 
   const booking = {
-    id: bookings.length + 1,
+    id: nextBookingId,
     ...sanitizedPayload,
     createdAt: new Date().toISOString(),
   };
 
+  nextBookingId += 1;
+
   bookings.push(booking);
 
   return res.status(201).json({ message: "Booking request received.", booking });
+});
+
+app.put("/api/bookings/:id", (req, res) => {
+  const requestedId = parseInt(req.params.id, 10);
+  const bookingIndex = bookings.findIndex((booking) => booking.id === requestedId);
+
+  if (bookingIndex === -1) {
+    return res.status(404).json({ message: "Booking not found." });
+  }
+
+  const { errors, sanitizedPayload } = validateBookingPayload(req.body || {});
+
+  if (Object.keys(errors).length > 0) {
+    return res.status(400).json({ message: "Validation failed.", errors });
+  }
+
+  const updatedBooking = {
+    ...bookings[bookingIndex],
+    ...sanitizedPayload,
+    id: bookings[bookingIndex].id,
+    updatedAt: new Date().toISOString(),
+  };
+
+  bookings[bookingIndex] = updatedBooking;
+
+  return res.status(200).json({ message: "Booking updated successfully.", booking: updatedBooking });
+});
+
+app.delete("/api/bookings/:id", (req, res) => {
+  const requestedId = parseInt(req.params.id, 10);
+  const bookingIndex = bookings.findIndex((booking) => booking.id === requestedId);
+
+  if (bookingIndex === -1) {
+    return res.status(404).json({ message: "Booking not found." });
+  }
+
+  const [deletedBooking] = bookings.splice(bookingIndex, 1);
+
+  return res.status(200).json({
+    message: "Booking deleted successfully.",
+    booking: deletedBooking,
+  });
 });
 
 //listen for incoming requests
