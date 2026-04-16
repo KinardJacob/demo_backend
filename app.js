@@ -195,6 +195,34 @@ app.post("/api/custom-sections", upload.none(), (req, res) => {
   return res.status(200).json(createdSection);
 });
 
+app.put("/api/custom-sections/:id", upload.none(), (req, res) => {
+  const requestedId = parseInt(req.params.id, 10);
+  const sectionIndex = customSections.findIndex((s) => s.id === requestedId);
+
+  if (sectionIndex === -1) {
+    return res.status(404).json({ message: "Custom section not found." });
+  }
+
+  const { errors, sanitizedPayload } = validateCustomSectionPayload(req.body || {});
+
+  if (Object.keys(errors).length > 0) {
+    return res.status(400).json({
+      message: "Validation failed.",
+      errors,
+    });
+  }
+
+  const updatedSection = {
+    ...customSections[sectionIndex],
+    ...sanitizedPayload,
+    updatedAt: new Date().toISOString(),
+  };
+
+  customSections[sectionIndex] = updatedSection;
+
+  return res.status(200).json(updatedSection);
+});
+
 //listen for incoming requests
 app.listen(3001, () => {
     //console.log('Server is running on port 3001');
