@@ -18,54 +18,79 @@ const storage = multer.diskStorage({
   
   const upload = multer({ storage: storage });
 
-  const ALLOWED_SECTION_TYPES = ["info", "feature", "testimonial", "offer"];
-
   const normalizeString = (value) => (typeof value === "string" ? value.trim() : "");
 
-  const validateCustomSectionPayload = (payload) => {
+  const normalizePrice = (value) => {
+    const rawPrice = normalizeString(value);
+    const numericCandidate = rawPrice.replace("$", "");
+    const numericValue = Number(numericCandidate);
+
+    if (!Number.isFinite(numericValue) || numericValue <= 0) {
+      return { isValid: false, normalized: rawPrice };
+    }
+
+    return {
+      isValid: true,
+      normalized: rawPrice.startsWith("$") ? rawPrice : `$${numericValue}`,
+    };
+  };
+
+  const buildSessionRecord = (id, timestamps, payload) => {
+    const base = {
+      id,
+      ...timestamps,
+      sessionName: payload.sessionName,
+      description: payload.description,
+      price: payload.price,
+    };
+
+    return {
+      ...base,
+      // Backward-compatible keys for existing UI consumers.
+      sectionTitle: payload.sessionName,
+      sectionType: "offer",
+      introText: payload.description,
+      ctaLabel: payload.price,
+      ctaUrl: "",
+    };
+  };
+
+  const validateCustomSessionPayload = (payload) => {
     const errors = {};
 
-    const sectionTitle = normalizeString(payload.sectionTitle);
-    const sectionType = normalizeString(payload.sectionType).toLowerCase();
-    const introText = normalizeString(payload.introText);
-    const ctaLabel = normalizeString(payload.ctaLabel);
-    const ctaUrl = normalizeString(payload.ctaUrl);
+    const sessionName = normalizeString(payload.sessionName || payload.sectionTitle);
+    const description = normalizeString(payload.description || payload.introText);
+    const submittedPrice = normalizeString(payload.price || payload.ctaLabel);
+    const normalizedPrice = normalizePrice(submittedPrice);
 
-    if (!sectionTitle) {
-      errors.sectionTitle = "Section title is required.";
-    } else if (sectionTitle.length < 3 || sectionTitle.length > 60) {
-      errors.sectionTitle = "Title must be between 3 and 60 characters.";
+    if (!sessionName) {
+      errors.sessionName = "Session name is required.";
+      errors.sectionTitle = "Session name is required.";
+    } else if (sessionName.length < 3 || sessionName.length > 60) {
+      errors.sessionName = "Name must be between 3 and 60 characters.";
+      errors.sectionTitle = "Name must be between 3 and 60 characters.";
     }
 
-    if (!sectionType) {
-      errors.sectionType = "Section type is required.";
-    } else if (!ALLOWED_SECTION_TYPES.includes(sectionType)) {
-      errors.sectionType = `Section type must be one of: ${ALLOWED_SECTION_TYPES.join(", ")}.`;
+    if (!description) {
+      errors.description = "Session description is required.";
+      errors.introText = "Session description is required.";
+    } else if (description.length < 20 || description.length > 260) {
+      errors.description = "Description must be between 20 and 260 characters.";
+      errors.introText = "Description must be between 20 and 260 characters.";
     }
 
-    if (!introText) {
-      errors.introText = "Intro text is required.";
-    } else if (introText.length < 20 || introText.length > 260) {
-      errors.introText = "Intro text must be between 20 and 260 characters.";
-    }
-
-    if (ctaLabel.length > 30) {
-      errors.ctaLabel = "CTA label must be 30 characters or less.";
-    }
-
-    if (ctaUrl) {
-      const allowedProtocols = /^https?:\/\//i;
-      if (!allowedProtocols.test(ctaUrl)) {
-        errors.ctaUrl = "CTA URL must start with http:// or https://.";
-      }
+    if (!submittedPrice) {
+      errors.price = "Price is required.";
+      errors.ctaLabel = "Price is required.";
+    } else if (!normalizedPrice.isValid) {
+      errors.price = "Price must be a positive number.";
+      errors.ctaLabel = "Price must be a positive number.";
     }
 
     const sanitizedPayload = {
-      sectionTitle,
-      sectionType,
-      introText,
-      ctaLabel,
-      ctaUrl,
+      sessionName,
+      description,
+      price: normalizedPrice.normalized,
     };
 
     return {
@@ -179,7 +204,7 @@ app.get("/api/packages/:id", (req, res) => {
 });
 
 app.post("/api/custom-sections", upload.none(), (req, res) => {
-  const { errors, sanitizedPayload } = validateCustomSectionPayload(req.body || {});
+  const { errors, sanitizedPayload } = validateCustomSessionPayload(req.body || {});
 
   if (Object.keys(errors).length > 0) {
     return res.status(400).json({
@@ -188,11 +213,11 @@ app.post("/api/custom-sections", upload.none(), (req, res) => {
     });
   }
 
-  const createdSection = {
-    id: customSections.length + 1,
-    createdAt: new Date().toISOString(),
-    ...sanitizedPayload,
-  };
+  const createdSection = buildSessionRecord(
+    customSections.length + 1,
+    { createdAt: new Date().toISOString() },
+    sanitizedPayload
+  );
 
   customSections = [createdSection, ...customSections];
 
@@ -207,7 +232,7 @@ app.put("/api/custom-sections/:id", upload.none(), (req, res) => {
     return res.status(404).json({ message: "Custom section not found." });
   }
 
-  const { errors, sanitizedPayload } = validateCustomSectionPayload(req.body || {});
+  const { errors, sanitizedPayload } = validateCustomSessionPayload(req.body || {});
 
   if (Object.keys(errors).length > 0) {
     return res.status(400).json({
@@ -216,11 +241,14 @@ app.put("/api/custom-sections/:id", upload.none(), (req, res) => {
     });
   }
 
-  const updatedSection = {
-    ...customSections[sectionIndex],
-    ...sanitizedPayload,
-    updatedAt: new Date().toISOString(),
-  };
+  const updatedSection = buildSessionRecord(
+    customSections[sectionIndex].id,
+    {
+      createdAt: customSections[sectionIndex].createdAt,
+      updatedAt: new Date().toISOString(),
+    },
+    sanitizedPayload
+  );
 
   customSections[sectionIndex] = updatedSection;
 
