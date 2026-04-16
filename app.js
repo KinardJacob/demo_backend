@@ -18,6 +18,62 @@ const storage = multer.diskStorage({
   
   const upload = multer({ storage: storage });
 
+  const ALLOWED_SECTION_TYPES = ["info", "feature", "testimonial", "offer"];
+
+  const normalizeString = (value) => (typeof value === "string" ? value.trim() : "");
+
+  const validateCustomSectionPayload = (payload) => {
+    const errors = {};
+
+    const sectionTitle = normalizeString(payload.sectionTitle);
+    const sectionType = normalizeString(payload.sectionType).toLowerCase();
+    const introText = normalizeString(payload.introText);
+    const ctaLabel = normalizeString(payload.ctaLabel);
+    const ctaUrl = normalizeString(payload.ctaUrl);
+
+    if (!sectionTitle) {
+      errors.sectionTitle = "Section title is required.";
+    } else if (sectionTitle.length < 3 || sectionTitle.length > 60) {
+      errors.sectionTitle = "Title must be between 3 and 60 characters.";
+    }
+
+    if (!sectionType) {
+      errors.sectionType = "Section type is required.";
+    } else if (!ALLOWED_SECTION_TYPES.includes(sectionType)) {
+      errors.sectionType = `Section type must be one of: ${ALLOWED_SECTION_TYPES.join(", ")}.`;
+    }
+
+    if (!introText) {
+      errors.introText = "Intro text is required.";
+    } else if (introText.length < 20 || introText.length > 260) {
+      errors.introText = "Intro text must be between 20 and 260 characters.";
+    }
+
+    if (ctaLabel.length > 30) {
+      errors.ctaLabel = "CTA label must be 30 characters or less.";
+    }
+
+    if (ctaUrl) {
+      const allowedProtocols = /^https?:\/\//i;
+      if (!allowedProtocols.test(ctaUrl)) {
+        errors.ctaUrl = "CTA URL must start with http:// or https://.";
+      }
+    }
+
+    const sanitizedPayload = {
+      sectionTitle,
+      sectionType,
+      introText,
+      ctaLabel,
+      ctaUrl,
+    };
+
+    return {
+      errors,
+      sanitizedPayload,
+    };
+  };
+
 let packages = [
   {
     "id": 1,
@@ -100,13 +156,43 @@ let packages = [
     "description": "For clients wanting dramatic landscapes and adventurous portrait storytelling."
   }
 ]
+
+let customSections = [];
+
 app.get("/api/packages", (req, res) => {
     res.send(packages);
 });
 
 app.get("/api/packages/:id", (req, res) => {
-    const package = packages.find((p)=>p.id===parseInt(req.params.id));
-    res.send(package);
+    const requestedId = parseInt(req.params.id, 10);
+    const foundPackage = packages.find((p) => p.id === requestedId);
+
+    if (!foundPackage) {
+      return res.status(404).json({ message: "Package not found." });
+    }
+
+    return res.send(foundPackage);
+});
+
+app.post("/api/custom-sections", upload.none(), (req, res) => {
+  const { errors, sanitizedPayload } = validateCustomSectionPayload(req.body || {});
+
+  if (Object.keys(errors).length > 0) {
+    return res.status(400).json({
+      message: "Validation failed.",
+      errors,
+    });
+  }
+
+  const createdSection = {
+    id: customSections.length + 1,
+    createdAt: new Date().toISOString(),
+    ...sanitizedPayload,
+  };
+
+  customSections = [createdSection, ...customSections];
+
+  return res.status(200).json(createdSection);
 });
 
 //listen for incoming requests
