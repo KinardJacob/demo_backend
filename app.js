@@ -271,6 +271,79 @@ app.delete("/api/custom-sections/:id", (req, res) => {
   });
 });
 
+let bookings = [];
+
+const validateBookingPayload = (body) => {
+  const errors = {};
+
+  const sessionType = normalizeString(body.sessionType);
+  const preferredDate = normalizeString(body.preferredDate);
+  const name = normalizeString(body.name);
+  const email = normalizeString(body.email);
+  const phone = normalizeString(body.phone);
+  const details = normalizeString(body.details);
+
+  if (!sessionType) {
+    errors.sessionType = "Please select a session type.";
+  }
+
+  if (!preferredDate) {
+    errors.preferredDate = "Please select a preferred date.";
+  } else {
+    const selected = new Date(preferredDate);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (isNaN(selected.getTime()) || selected <= today) {
+      errors.preferredDate = "Preferred date must be a future date.";
+    }
+  }
+
+  if (!name) {
+    errors.name = "Name is required.";
+  } else if (name.length < 2 || name.length > 50) {
+    errors.name = "Name must be between 2 and 50 characters.";
+  }
+
+  if (!email) {
+    errors.email = "Email is required.";
+  } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    errors.email = "Please enter a valid email address.";
+  }
+
+  if (!phone) {
+    errors.phone = "Phone number is required.";
+  } else if (phone.replace(/\D/g, "").length < 10) {
+    errors.phone = "Please enter a valid phone number.";
+  }
+
+  if (details.length > 500) {
+    errors.details = "Details must be 500 characters or less.";
+  }
+
+  return {
+    errors,
+    sanitizedPayload: { sessionType, preferredDate, name, email, phone, details },
+  };
+};
+
+app.post("/api/bookings", (req, res) => {
+  const { errors, sanitizedPayload } = validateBookingPayload(req.body || {});
+
+  if (Object.keys(errors).length > 0) {
+    return res.status(400).json({ message: "Validation failed.", errors });
+  }
+
+  const booking = {
+    id: bookings.length + 1,
+    ...sanitizedPayload,
+    createdAt: new Date().toISOString(),
+  };
+
+  bookings.push(booking);
+
+  return res.status(201).json({ message: "Booking request received.", booking });
+});
+
 //listen for incoming requests
 app.listen(3001, () => {
     //console.log('Server is running on port 3001');
