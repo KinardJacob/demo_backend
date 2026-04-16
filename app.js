@@ -159,6 +159,10 @@ let packages = [
 
 let customSections = [];
 
+app.get("/api/custom-sections", (req, res) => {
+  return res.status(200).json(customSections);
+});
+
 app.get("/api/packages", (req, res) => {
     res.send(packages);
 });
@@ -221,6 +225,22 @@ app.put("/api/custom-sections/:id", upload.none(), (req, res) => {
   customSections[sectionIndex] = updatedSection;
 
   return res.status(200).json(updatedSection);
+});
+
+app.delete("/api/custom-sections/:id", (req, res) => {
+  const requestedId = parseInt(req.params.id, 10);
+  const sectionIndex = customSections.findIndex((s) => s.id === requestedId);
+
+  if (sectionIndex === -1) {
+    return res.status(404).json({ message: "Custom section not found." });
+  }
+
+  const [deletedSection] = customSections.splice(sectionIndex, 1);
+  return res.status(200).json({
+    message: "Custom section deleted.",
+    deletedSection,
+    customSections,
+  });
 });
 
 //listen for incoming requests
