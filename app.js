@@ -1,7 +1,9 @@
+require("dotenv").config();
 const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const Joi = require('joi');
+const { default: mongoose } = require('mongoose');
 const app = express();
 app.use(express.static('public'));
 app.use('/images', express.static('images'));
@@ -18,6 +20,20 @@ const storage = multer.diskStorage({
   });
   
   const upload = multer({ storage: storage });
+
+  mongoose
+  .connect(process.env.MONGODB_URI)
+  .then(() => console.log("Connected to mongodb..."))
+  .catch((err) => console.error("could not connect ot mongodb...", err));
+
+  const schema = new mongoose.Schema({
+    name: String,
+  });
+
+  async function createMessage() {
+    const result = await message.save();
+    console.log(result);
+  }
 
   const normalizeString = (value) => (typeof value === "string" ? value.trim() : "");
 
