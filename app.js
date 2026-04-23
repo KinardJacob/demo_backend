@@ -53,8 +53,22 @@ const storage = multer.diskStorage({
     updatedAt: Date,
   });
 
+  const packageSchema = new mongoose.Schema({
+    id: Number,
+    image: String,
+    title: String,
+    type: String,
+    duration: String,
+    location: String,
+    price: String,
+    description: String,
+    createdAt: Date,
+    updatedAt: Date,
+  });
+
   const CustomSection = mongoose.model("CustomSection", customSectionSchema);
   const Booking = mongoose.model("Booking", bookingDataSchema);
+  const Package = mongoose.model("Package", packageSchema);
 
   const normalizeString = (value) => (typeof value === "string" ? value.trim() : "");
 
@@ -229,18 +243,55 @@ let packages = [
   }
 ]
 
+const packageValidationSchema = Joi.object({
+  title: Joi.string().trim().min(2).max(80).required(),
+  type: Joi.string().trim().min(2).max(40).required(),
+  duration: Joi.string().trim().min(2).max(40).required(),
+  location: Joi.string().trim().min(2).max(80).required(),
+  price: Joi.string().trim().min(1).max(20).required(),
+  description: Joi.string().trim().min(10).max(320).required(),
+  image: Joi.string().trim().allow(""),
+});
+
+const ensureSeedPackages = async () => {
+  const count = await Package.countDocuments();
+
+  if (count === 0) {
+    await Package.insertMany(
+      packages.map((pkg) => ({
+        ...pkg,
+        createdAt: new Date().toISOString(),
+      }))
+    );
+  }
+};
+
+const validatePackagePayload = (payload) => {
+  const validationResult = packageValidationSchema.validate(payload || {}, {
+    abortEarly: false,
+    stripUnknown: true,
+  });
+
+  return {
+    errors: validationResult.error ? formatJoiErrors(validationResult.error.details) : {},
+    sanitizedPayload: validationResult.value || {},
+  };
+};
+
 app.get("/api/custom-sections", async (req, res) => {
   const customSections = await CustomSection.find().sort({ createdAt: -1 });
   return res.status(200).json(customSections);
 });
 
-app.get("/api/packages", (req, res) => {
-    res.send(packages);
+app.get("/api/packages", async (req, res) => {
+    await ensureSeedPackages();
+    const persistedPackages = await Package.find().sort({ id: 1 });
+    return res.send(persistedPackages);
 });
 
-app.get("/api/packages/:id", (req, res) => {
+app.get("/api/packages/:id", async (req, res) => {
     const requestedId = parseInt(req.params.id, 10);
-    const foundPackage = packages.find((p) => p.id === requestedId);
+    const foundPackage = await Package.findOne({ id: requestedId });
 
     if (!foundPackage) {
       return res.status(404).json({ message: "Package not found." });
@@ -249,10 +300,35 @@ app.get("/api/packages/:id", (req, res) => {
     return res.send(foundPackage);
 });
 
+app.post("/api/packages", upload.none(), async (req, res) => {
+  await ensureSeedPackages();
+
+  const { errors, sanitizedPayload } = validatePackagePayload(req.body || {});
+
+  if (Object.keys(errors).length > 0) {
+    return res.status(400).json({ message: "Validation failed.", errors });
+  }
+
+  const currentMax = await Package.findOne().sort({ id: -1 }).select("id");
+  const nextId = currentMax && Number.isFinite(currentMax.id) ? currentMax.id + 1 : 1;
+
+  const createdPackage = new Package({
+    id: nextId,
+    ...sanitizedPayload,
+    createdAt: new Date().toISOString(),
+  });
+
+  await createdPackage.save();
+
+  return res.status(201).json(createdPackage);
+});
+
 app.get("/api/session-options", async (req, res) => {
+  await ensureSeedPackages();
+  const persistedPackages = await Package.find().sort({ id: 1 });
   const customSections = await CustomSection.find().sort({ createdAt: -1 });
 
-  const packageOptions = packages.map((pkg) => ({
+  const packageOptions = persistedPackages.map((pkg) => ({
     id: `package-${pkg.id}`,
     source: "package",
     name: pkg.title,
