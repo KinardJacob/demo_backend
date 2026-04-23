@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Book a Session</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="booking.css">
+</head>
+<body>
+  <main class="booking-shell">
+    <section class="booking-panel">
+      <h1>Book a Session</h1>
+      <p class="subtitle">Choose a package or custom bundle and see its image preview update instantly.</p>
+
+      <form id="booking-form" novalidate>
+        <label for="sessionType">Session Option</label>
+        <select id="sessionType" name="sessionType" required>
+          <option value="">Select a session option</option>
+        </select>
+
+        <div class="preview" id="session-preview" aria-live="polite">
+          <img id="preview-image" alt="Selected session preview" src="" hidden>
+          <div class="preview-details">
+            <h2 id="preview-name">No option selected</h2>
+            <p id="preview-price"></p>
+            <p id="preview-description"></p>
+          </div>
+        </div>
+
+        <input type="hidden" id="sessionImage" name="sessionImage">
+        <input type="hidden" id="sessionSource" name="sessionSource">
+
+        <label for="preferredDate">Preferred Date</label>
+        <input id="preferredDate" name="preferredDate" type="date" required>
+
+        <label for="name">Name</label>
+        <input id="name" name="name" type="text" required>
+
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email" required>
+
+        <label for="phone">Phone</label>
+        <input id="phone" name="phone" type="tel" required>
+
+        <label for="details">Details</label>
+        <textarea id="details" name="details" rows="4"></textarea>
+
+        <button type="submit">Submit Booking</button>
+        <p id="form-message" class="form-message" aria-live="polite"></p>
+      </form>
+    </section>
+  </main>
+
+  <script src="booking.js"></script>
+</body>
+</html>

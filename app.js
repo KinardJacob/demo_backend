@@ -26,14 +26,35 @@ const storage = multer.diskStorage({
   .then(() => console.log("Connected to mongodb..."))
   .catch((err) => console.error("could not connect ot mongodb...", err));
 
-  const schema = new mongoose.Schema({
-    name: String,
+  const customSectionSchema = new mongoose.Schema({
+    sessionName: String,
+    description: String,
+    price: String,
+    image: String,
+    sectionTitle: String,
+    sectionType: String,
+    introText: String,
+    ctaLabel: String,
+    ctaUrl: String,
+    createdAt: Date,
+    updatedAt: Date,
   });
 
-  async function createMessage() {
-    const result = await message.save();
-    console.log(result);
-  }
+  const bookingDataSchema = new mongoose.Schema({
+    sessionType: String,
+    sessionImage: String,
+    sessionSource: String,
+    preferredDate: String,
+    name: String,
+    email: String,
+    phone: String,
+    details: String,
+    createdAt: Date,
+    updatedAt: Date,
+  });
+
+  const CustomSection = mongoose.model("CustomSection", customSectionSchema);
+  const Booking = mongoose.model("Booking", bookingDataSchema);
 
   const normalizeString = (value) => (typeof value === "string" ? value.trim() : "");
 
@@ -52,6 +73,14 @@ const storage = multer.diskStorage({
     };
   };
 
+  const buildImagePath = (filename) => {
+    if (!filename) {
+      return "";
+    }
+
+    return `images/${encodeURIComponent(filename)}`;
+  };
+
   const buildSessionRecord = (id, timestamps, payload) => {
     const base = {
       id,
@@ -59,6 +88,7 @@ const storage = multer.diskStorage({
       sessionName: payload.sessionName,
       description: payload.description,
       price: payload.price,
+      image: payload.image || "",
     };
 
     return {
@@ -68,7 +98,7 @@ const storage = multer.diskStorage({
       sectionType: "offer",
       introText: payload.description,
       ctaLabel: payload.price,
-      ctaUrl: "",
+      ctaUrl: payload.image || "",
     };
   };
 
@@ -199,9 +229,8 @@ let packages = [
   }
 ]
 
-let customSections = [];
-
-app.get("/api/custom-sections", (req, res) => {
+app.get("/api/custom-sections", async (req, res) => {
+  const customSections = await CustomSection.find().sort({ createdAt: -1 });
   return res.status(200).json(customSections);
 });
 
@@ -220,7 +249,31 @@ app.get("/api/packages/:id", (req, res) => {
     return res.send(foundPackage);
 });
 
-app.post("/api/custom-sections", upload.none(), (req, res) => {
+app.get("/api/session-options", async (req, res) => {
+  const customSections = await CustomSection.find().sort({ createdAt: -1 });
+
+  const packageOptions = packages.map((pkg) => ({
+    id: `package-${pkg.id}`,
+    source: "package",
+    name: pkg.title,
+    description: pkg.description,
+    price: pkg.price,
+    image: pkg.image || "",
+  }));
+
+  const customOptions = customSections.map((section) => ({
+    id: `custom-${section._id}`,
+    source: "custom",
+    name: section.sessionName,
+    description: section.description,
+    price: section.price,
+    image: section.image || section.ctaUrl || "",
+  }));
+
+  return res.status(200).json([...packageOptions, ...customOptions]);
+});
+
+app.post("/api/custom-sections", upload.single("img"), async (req, res) => {
   const { errors, sanitizedPayload } = validateCustomSessionPayload(req.body || {});
 
   if (Object.keys(errors).length > 0) {
@@ -230,22 +283,30 @@ app.post("/api/custom-sections", upload.none(), (req, res) => {
     });
   }
 
-  const createdSection = buildSessionRecord(
-    customSections.length + 1,
-    { createdAt: new Date().toISOString() },
-    sanitizedPayload
+  const createdSection = new CustomSection(
+    buildSessionRecord(
+      null,
+      { createdAt: new Date().toISOString() },
+      {
+        ...sanitizedPayload,
+        image: req.file ? buildImagePath(req.file.filename) : "",
+      }
+    )
   );
 
-  customSections = [createdSection, ...customSections];
+  await createdSection.save();
 
   return res.status(200).json(createdSection);
 });
 
-app.put("/api/custom-sections/:id", upload.none(), (req, res) => {
-  const requestedId = parseInt(req.params.id, 10);
-  const sectionIndex = customSections.findIndex((s) => s.id === requestedId);
+app.put("/api/custom-sections/:id", upload.single("img"), async (req, res) => {
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    return res.status(404).json({ message: "Custom section not found." });
+  }
 
-  if (sectionIndex === -1) {
+  const existingSection = await CustomSection.findById(req.params.id);
+
+  if (!existingSection) {
     return res.status(404).json({ message: "Custom section not found." });
   }
 
@@ -259,44 +320,48 @@ app.put("/api/custom-sections/:id", upload.none(), (req, res) => {
   }
 
   const updatedSection = buildSessionRecord(
-    customSections[sectionIndex].id,
+    existingSection._id,
     {
-      createdAt: customSections[sectionIndex].createdAt,
+      createdAt: existingSection.createdAt,
       updatedAt: new Date().toISOString(),
     },
-    sanitizedPayload
+    {
+      ...sanitizedPayload,
+      image: req.file ? buildImagePath(req.file.filename) : (existingSection.image || ""),
+    }
   );
 
-  customSections[sectionIndex] = updatedSection;
+  const savedSection = await CustomSection.findByIdAndUpdate(req.params.id, updatedSection, {
+    new: true,
+  });
 
-  return res.status(200).json(updatedSection);
+  return res.status(200).json(savedSection);
 });
 
-app.delete("/api/custom-sections/:id", (req, res) => {
-  const requestedId = parseInt(req.params.id, 10);
-  const sectionIndex = customSections.findIndex((s) => s.id === requestedId);
-
-  if (sectionIndex === -1) {
+app.delete("/api/custom-sections/:id", async (req, res) => {
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
     return res.status(404).json({ message: "Custom section not found." });
   }
 
-  const [deletedSection] = customSections.splice(sectionIndex, 1);
+  const deletedSection = await CustomSection.findByIdAndDelete(req.params.id);
+
+  if (!deletedSection) {
+    return res.status(404).json({ message: "Custom section not found." });
+  }
+
   return res.status(200).json({
     message: "Custom section deleted.",
     deletedSection,
-    customSections,
   });
 });
 
-let bookings = [];
-
-let nextBookingId = 1;
-
-const bookingSchema = Joi.object({
+const bookingValidationSchema = Joi.object({
   sessionType: Joi.string().trim().required().messages({
     "string.empty": "Please select a session type.",
     "any.required": "Please select a session type.",
   }),
+  sessionImage: Joi.string().trim().allow(""),
+  sessionSource: Joi.string().trim().valid("package", "custom").allow(""),
   preferredDate: Joi.string()
     .trim()
     .required()
@@ -376,7 +441,7 @@ const formatJoiErrors = (details = []) => {
 };
 
 const validateBookingPayload = (body) => {
-  const validationResult = bookingSchema.validate(body || {}, {
+  const validationResult = bookingValidationSchema.validate(body || {}, {
     abortEarly: false,
     stripUnknown: true,
   });
@@ -387,35 +452,36 @@ const validateBookingPayload = (body) => {
   };
 };
 
-app.get("/api/bookings", (req, res) => {
+app.get("/api/bookings", async (req, res) => {
+  const bookings = await Booking.find().sort({ createdAt: -1 });
   return res.status(200).json({ bookings });
 });
 
-app.post("/api/bookings", (req, res) => {
+app.post("/api/bookings", async (req, res) => {
   const { errors, sanitizedPayload } = validateBookingPayload(req.body || {});
 
   if (Object.keys(errors).length > 0) {
     return res.status(400).json({ message: "Validation failed.", errors });
   }
 
-  const booking = {
-    id: nextBookingId,
+  const booking = new Booking({
     ...sanitizedPayload,
     createdAt: new Date().toISOString(),
-  };
+  });
 
-  nextBookingId += 1;
-
-  bookings.push(booking);
+  await booking.save();
 
   return res.status(201).json({ message: "Booking request received.", booking });
 });
 
-app.put("/api/bookings/:id", (req, res) => {
-  const requestedId = parseInt(req.params.id, 10);
-  const bookingIndex = bookings.findIndex((booking) => booking.id === requestedId);
+app.put("/api/bookings/:id", async (req, res) => {
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    return res.status(404).json({ message: "Booking not found." });
+  }
 
-  if (bookingIndex === -1) {
+  const existingBooking = await Booking.findById(req.params.id);
+
+  if (!existingBooking) {
     return res.status(404).json({ message: "Booking not found." });
   }
 
@@ -425,27 +491,25 @@ app.put("/api/bookings/:id", (req, res) => {
     return res.status(400).json({ message: "Validation failed.", errors });
   }
 
-  const updatedBooking = {
-    ...bookings[bookingIndex],
+  const updatedBooking = await Booking.findByIdAndUpdate(req.params.id, {
+    ...existingBooking.toObject(),
     ...sanitizedPayload,
-    id: bookings[bookingIndex].id,
     updatedAt: new Date().toISOString(),
-  };
-
-  bookings[bookingIndex] = updatedBooking;
+  }, { new: true });
 
   return res.status(200).json({ message: "Booking updated successfully.", booking: updatedBooking });
 });
 
-app.delete("/api/bookings/:id", (req, res) => {
-  const requestedId = parseInt(req.params.id, 10);
-  const bookingIndex = bookings.findIndex((booking) => booking.id === requestedId);
-
-  if (bookingIndex === -1) {
+app.delete("/api/bookings/:id", async (req, res) => {
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
     return res.status(404).json({ message: "Booking not found." });
   }
 
-  const [deletedBooking] = bookings.splice(bookingIndex, 1);
+  const deletedBooking = await Booking.findByIdAndDelete(req.params.id);
+
+  if (!deletedBooking) {
+    return res.status(404).json({ message: "Booking not found." });
+  }
 
   return res.status(200).json({
     message: "Booking deleted successfully.",
@@ -454,6 +518,7 @@ app.delete("/api/bookings/:id", (req, res) => {
 });
 
 //listen for incoming requests
-app.listen(3001, () => {
-    //console.log('Server is running on port 3001');
+const port = process.env.PORT || 3001;
+app.listen(port, "0.0.0.0", () => {
+  console.log(`Server is up and running on ${port}`);
 });
